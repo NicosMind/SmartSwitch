@@ -64,18 +64,13 @@ void flashLed()
   FastLED.show();
 }
 
-void CircleColor(int R, int G, int B)
+void CircleColor(uint8_t R, uint8_t G, uint8_t B)
 {
   for (int i = 0; i <= NUM_LEDS; i++)
   {
     leds[i] = CRGB(R, G, B);
     FastLED.show();
-    delay(50);
-  }
-  for (int i = 0; i <= NUM_LEDS; i++)
-  {
-    leds[i] = CRGB::Black;
-    FastLED.show();
+
     delay(50);
   }
 }
@@ -131,7 +126,8 @@ void setConfig(bool val)
   preferences.putBool(CONFIG_KEY, val);
 }
 
-void resetConfig(){
+void resetConfig()
+{
   setConfig(false);
   ESP.restart();
 }
@@ -162,15 +158,16 @@ void setupWifi(WifiCredentials credentials)
   WiFi.begin(credentials.Ssid.c_str(), credentials.Pwd.c_str());
 
   unsigned long startTime = millis();
-  
+
   while (WiFi.status() != WL_CONNECTED)
   {
     Serial.print("."); // Affiche des points .... tant que connexion n'est pas OK
     delay(100);
     unsigned long currentTime = millis();
     unsigned long elapsedTime = currentTime - startTime;
-    
-    if(elapsedTime > PERIOD) {
+
+    if (elapsedTime > PERIOD)
+    {
       resetConfig();
     };
   }
@@ -303,66 +300,43 @@ bool hasConfig()
   return hasConfig;
 }
 
-struct touchPad
-{
-  const uint8_t PIN;
-  uint32_t numberKeyPresses;
-  bool pressed;
-};
+int a = 0;
 
-int threshold = 40;
-touchPad touchPad_1 = {T7, 0, false};
-touchPad touchPad_2 = {T6, 0, false};
-touchPad touchPad_3 = {T4, 0, false};
-
-void IRAM_ATTR triggerTouch_1()
+void IRAM_ATTR setLeft()
 {
-  touchPad_1.numberKeyPresses += 1;
-  touchPad_1.pressed = true;
-}
-void IRAM_ATTR triggerTouch_2()
-{
-  touchPad_2.numberKeyPresses += 1;
-  touchPad_2.pressed = true;
-}
-void IRAM_ATTR triggerTouch_3()
-{
-  touchPad_3.numberKeyPresses += 1;
-  touchPad_3.pressed = true;
+  a = 1;
 }
 
-void initTouchPad()
+void IRAM_ATTR setRight()
 {
-  touchAttachInterrupt(touchPad_1.PIN, triggerTouch_1, threshold);
-  touchAttachInterrupt(touchPad_2.PIN, triggerTouch_2, threshold);
-  touchAttachInterrupt(touchPad_3.PIN, triggerTouch_3, threshold);
+  a = 0;
 }
 
-void touchPadRoutine()
+void IRAM_ATTR setMiddle()
 {
-  if (touchPad_1.pressed)
-  {
-    Serial.printf("TouchPad 1 has been pressed %u times\n", touchPad_1.numberKeyPresses);
-    touchPad_1.pressed = false;
-  }
-  if (touchPad_2.pressed)
-  {
-    Serial.printf("TouchPad 2 has been pressed %u times\n", touchPad_2.numberKeyPresses);
-    touchPad_2.pressed = false;
-  }
-  if (touchPad_3.pressed)
-  {
-    Serial.printf("TouchPad 3 has been pressed %u times\n", touchPad_3.numberKeyPresses);
-    touchPad_3.pressed = false;
-  }
 }
+
+void initInterrupts()
+{
+  attachInterrupt(25, setMiddle, RISING);
+  attachInterrupt(26, setRight, RISING);
+  attachInterrupt(27, setLeft, RISING);
+}
+
+
+
+
 
 void setup()
 {
   Serial.begin(115200);
+  pinMode(25, INPUT);
+  pinMode(26, INPUT);
+  pinMode(27, INPUT);
 
   initLeds();
-  initTouchPad();
+  initInterrupts();
+  
 
   if (hasConfig())
   {
@@ -389,35 +363,45 @@ void setup()
 
 void loop()
 {
-  magnetResetConfig();
-  touchPadRoutine();
-  // Serial.println(hall_sensor_read());
-  //  WiFi.scanNetworks will return the number of networks found
-  //  int n = WiFi.scanNetworks();
-  //  Serial.println("scan done");
-  //  if (n == 0)
-  //  {
-  //    Serial.println("no networks found");
-  //  }
-  //  else
-  //  {
-  //    Serial.print(n);
-  //    Serial.println(" networks found");
-  //    for (int i = 0; i < n; ++i)
-  //    {
-  //      // Print SSID and RSSI for each network found
-  //      Serial.print(i + 1);
-  //      Serial.print(": ");
-  //      Serial.print(WiFi.SSID(i));
-  //      Serial.print(" (");
-  //      Serial.print(WiFi.RSSI(i));
-  //      Serial.print(")");
-  //      Serial.println((WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*");
-  //      delay(10);
-  //    }
-  //  }
-  //  Serial.println("");
 
-  // Wait a bit before scanning again
-  delay(1000);
+  if (a == 1)
+  {
+    for (int i = 0; i <= 1; i++)
+    {
+      CircleColor(255, 0, 0);
+    }
+  }else {
+    CircleColor(0, 0, 0);
+  }
+  
+
+  magnetResetConfig();
+
+  // touchPadRoutine();
+  //  Serial.println(hall_sensor_read());
+  //   WiFi.scanNetworks will return the number of networks found
+  //   int n = WiFi.scanNetworks();
+  //   Serial.println("scan done");
+  //   if (n == 0)
+  //   {
+  //     Serial.println("no networks found");
+  //   }
+  //   else
+  //   {
+  //     Serial.print(n);
+  //     Serial.println(" networks found");
+  //     for (int i = 0; i < n; ++i)
+  //     {
+  //       // Print SSID and RSSI for each network found
+  //       Serial.print(i + 1);
+  //       Serial.print(": ");
+  //       Serial.print(WiFi.SSID(i));
+  //       Serial.print(" (");
+  //       Serial.print(WiFi.RSSI(i));
+  //       Serial.print(")");
+  //       Serial.println((WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*");
+  //       delay(10);
+  //     }
+  //   }
+  //   Serial.println("");
 }

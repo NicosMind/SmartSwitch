@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <FastLED.h>
 #include <Preferences.h>
+#include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <SPIFFS.h>
 #include "driver/adc.h"
@@ -26,6 +27,8 @@ const String NAME_PARAM = "name";
 const String LOCATION_PARAM = "location";
 const String DEFAULT_NAME = "NicosMind Switch";
 
+String listFiles(bool ishtml = false);
+
 AsyncWebServer server(80);
 
 class WifiCredentials
@@ -41,6 +44,51 @@ public:
     Name = name;
   }
 };
+
+void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
+{
+  String logmessage = "Client:" + request->client()->remoteIP().toString() + " " + request->url();
+  Serial.println(logmessage);
+  
+  if (!index)
+  {
+    logmessage = "Upload Start: " + String(filename);
+    // open the file on first call and store the file handle in the request object
+    request->_tempFile = SPIFFS.open("/" + filename, "w");
+    Serial.println(logmessage);
+  }
+
+  if (len)
+  {
+    // stream the incoming chunk to the opened file
+    request->_tempFile.write(data, len);
+    logmessage = "Writing file: " + String(filename) + " index=" + String(index) + " len=" + String(len);
+    Serial.println(logmessage);
+  }
+
+  if (final)
+  {
+    logmessage = "Upload Complete: " + String(filename) + ",size: " + String(index + len);
+    // close the file handle as the upload is now done
+    request->_tempFile.close();
+    Serial.println(logmessage);
+    request->redirect("/");
+  }
+}
+
+// Make size of files human readable
+// source: https://github.com/CelliesProjects/minimalUploadAuthESP32
+String humanReadableSize(const size_t bytes)
+{
+  if (bytes < 1024)
+    return String(bytes) + " B";
+  else if (bytes < (1024 * 1024))
+    return String(bytes / 1024.0) + " KB";
+  else if (bytes < (1024 * 1024 * 1024))
+    return String(bytes / 1024.0 / 1024.0) + " MB";
+  else
+    return String(bytes / 1024.0 / 1024.0 / 1024.0) + " GB";
+}
 
 void setLedColor()
 {
@@ -205,11 +253,68 @@ void initSpiffs()
   }
 }
 
+
+
+String listFiles(bool ishtml)
+{
+  String returnText = "";
+  Serial.println("Listing files stored on SPIFFS");
+  File root = SPIFFS.open("/");
+  File foundfile = root.openNextFile();
+  if (ishtml)
+  {
+    returnText += "<table><tr><th align='left'>Name</th><th align='left'>Size</th></tr>";
+  }
+  while (foundfile)
+  {
+    if (ishtml)
+    {
+      returnText += "<tr align='left'><td>" + String(foundfile.name()) + "</td><td>" + humanReadableSize(foundfile.size()) + "</td></tr>";
+    }
+    else
+    {
+      returnText += "File: " + String(foundfile.name()) + "\n";
+    }
+    foundfile = root.openNextFile();
+  }
+  if (ishtml)
+  {
+    returnText += "</table>";
+  }
+  root.close();
+  foundfile.close();
+  return returnText;
+}
+
+// String processor(const String &var)
+// {
+//   if (var == "FILELIST")
+//   {
+//     return listFiles(true);
+//   }
+//   if (var == "FREESPIFFS")
+//   {
+//     return humanReadableSize((SPIFFS.totalBytes() - SPIFFS.usedBytes()));
+//   }
+
+//   if (var == "USEDSPIFFS")
+//   {
+//     return humanReadableSize(SPIFFS.usedBytes());
+//   }
+
+//   if (var == "TOTALSPIFFS")
+//   {
+//     return humanReadableSize(SPIFFS.totalBytes());
+//   }
+
+//   return String();
+// }
+
+/// config webserver bootstrap
 void initWebServerConfig()
 {
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
             {
-    Serial.println("get page");
     request->send(SPIFFS, "/index.html", "text/html"); });
 
   server.on("/bootstrap.min.css", HTTP_GET, [](AsyncWebServerRequest *request)
@@ -279,7 +384,8 @@ void initWebServer()
 {
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
             {
-    Serial.println("get page");
+    String logmessage = "Client:" + request->client()->remoteIP().toString() + + " " + request->url();
+    Serial.println(logmessage);
     request->send(SPIFFS, "/firmware.html", "text/html"); });
 
   server.on("/bootstrap.min.css", HTTP_GET, [](AsyncWebServerRequest *request)
@@ -287,6 +393,11 @@ void initWebServer()
 
   server.on("/img.png", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(SPIFFS, "/img.png", "image/png"); });
+
+  server.on(
+      "/UploadFile", HTTP_POST, [](AsyncWebServerRequest *request)
+      { request->send(200); },
+      handleUpload);
 
   /* On affiche que le serveur est actif */
   server.begin();
@@ -323,9 +434,12 @@ void initInterrupts()
   attachInterrupt(27, setLeft, RISING);
 }
 
-
-
-
+void rebootESP(String message)
+{
+  Serial.print("Rebooting ESP32: ");
+  Serial.println(message);
+  ESP.restart();
+}
 
 void setup()
 {
@@ -336,12 +450,29 @@ void setup()
 
   initLeds();
   initInterrupts();
-  
 
   if (hasConfig())
   {
     WifiCredentials credentials = getWifiCredentials();
     setupWifi(credentials);
+
+    Serial.println("Mounting SPIFFS ...");
+    if (!SPIFFS.begin(true))
+    {
+      // if you have not used SPIFFS before on a ESP32, it will show this error.
+      // after a reboot SPIFFS will be configured and will happily work.
+      Serial.println("ERROR: Cannot mount SPIFFS, Rebooting");
+      rebootESP("ERROR: Cannot mount SPIFFS, Rebooting");
+    }
+
+    Serial.print("SPIFFS Free: ");
+    Serial.println(humanReadableSize((SPIFFS.totalBytes() - SPIFFS.usedBytes())));
+    Serial.print("SPIFFS Used: ");
+    Serial.println(humanReadableSize(SPIFFS.usedBytes()));
+    Serial.print("SPIFFS Total: ");
+    Serial.println(humanReadableSize(SPIFFS.totalBytes()));
+
+    Serial.println(listFiles());
 
     Serial.print("Connecting...");
     Serial.print("IP address: ");
@@ -370,10 +501,11 @@ void loop()
     {
       CircleColor(255, 0, 0);
     }
-  }else {
+  }
+  else
+  {
     CircleColor(0, 0, 0);
   }
-  
 
   magnetResetConfig();
 

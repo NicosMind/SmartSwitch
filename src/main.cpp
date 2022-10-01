@@ -5,6 +5,7 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <SPIFFS.h>
+#include "Update.h"
 #include "driver/adc.h"
 
 #define LED_PIN 32
@@ -44,12 +45,61 @@ public:
     Name = name;
   }
 };
+void rebootESP(String message)
+{
+  Serial.print("Rebooting ESP32: ");
+  Serial.println(message);
+  ESP.restart();
+}
+
+void flash(String filename)
+{
+  File file = SPIFFS.open("/" + filename);
+
+  if (!file)
+  {
+    Serial.println("Failed to open file for reading");
+    return;
+  }
+
+  Serial.println("Starting update..");
+
+  size_t fileSize = file.size();
+
+  if (!Update.begin(fileSize))
+  {
+
+    Serial.println("Cannot do the update");
+    return;
+  };
+
+  Update.writeStream(file);
+
+  if (Update.end())
+  {
+
+    Serial.println("Successful update");
+  }
+  else
+  {
+
+    Serial.println("Error Occurred: " + String(Update.getError()));
+    return;
+  }
+
+  file.close();
+
+  Serial.println("Reset in 4 seconds...");
+  delay(4000);
+
+  rebootESP("Rebooting...");
+}
 
 void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
 {
   String logmessage = "Client:" + request->client()->remoteIP().toString() + " " + request->url();
   Serial.println(logmessage);
-  
+
   if (!index)
   {
     logmessage = "Upload Start: " + String(filename);
@@ -71,8 +121,11 @@ void handleUpload(AsyncWebServerRequest *request, String filename, size_t index,
     logmessage = "Upload Complete: " + String(filename) + ",size: " + String(index + len);
     // close the file handle as the upload is now done
     request->_tempFile.close();
+
     Serial.println(logmessage);
-    request->redirect("/");
+
+    flash(filename);
+    // request->redirect("/");
   }
 }
 
@@ -253,8 +306,6 @@ void initSpiffs()
   }
 }
 
-
-
 String listFiles(bool ishtml)
 {
   String returnText = "";
@@ -314,8 +365,7 @@ String listFiles(bool ishtml)
 void initWebServerConfig()
 {
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
-            {
-    request->send(SPIFFS, "/index.html", "text/html"); });
+            { request->send(SPIFFS, "/index.html", "text/html"); });
 
   server.on("/bootstrap.min.css", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(SPIFFS, "/bootstrap.min.css", "text/css"); });
@@ -434,13 +484,6 @@ void initInterrupts()
   attachInterrupt(27, setLeft, RISING);
 }
 
-void rebootESP(String message)
-{
-  Serial.print("Rebooting ESP32: ");
-  Serial.println(message);
-  ESP.restart();
-}
-
 void setup()
 {
   Serial.begin(115200);
@@ -507,6 +550,7 @@ void loop()
     CircleColor(0, 0, 0);
   }
 
+  // Serial.println("Yo bitches");
   magnetResetConfig();
 
   // touchPadRoutine();

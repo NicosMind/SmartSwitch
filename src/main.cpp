@@ -52,9 +52,20 @@ void rebootESP(String message)
   ESP.restart();
 }
 
+void deleteFile(String filename)
+{
+  String filePath = "/" + filename;
+  if (SPIFFS.exists(filePath))
+  {
+    SPIFFS.remove(filePath);
+  }
+}
+
 void flash(String filename)
 {
-  File file = SPIFFS.open("/" + filename);
+  String filePath = "/" + filename;
+
+  File file = SPIFFS.open(filePath);
 
   if (!file)
   {
@@ -90,42 +101,39 @@ void flash(String filename)
   file.close();
 
   Serial.println("Reset in 4 seconds...");
+
+  
   delay(4000);
 
   rebootESP("Rebooting...");
 }
 
-void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
-{
+void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
   String logmessage = "Client:" + request->client()->remoteIP().toString() + " " + request->url();
   Serial.println(logmessage);
 
-  if (!index)
-  {
+  if (!index) {
     logmessage = "Upload Start: " + String(filename);
     // open the file on first call and store the file handle in the request object
     request->_tempFile = SPIFFS.open("/" + filename, "w");
     Serial.println(logmessage);
   }
 
-  if (len)
-  {
+  if (len) {
     // stream the incoming chunk to the opened file
     request->_tempFile.write(data, len);
     logmessage = "Writing file: " + String(filename) + " index=" + String(index) + " len=" + String(len);
     Serial.println(logmessage);
   }
 
-  if (final)
-  {
+  if (final) {
     logmessage = "Upload Complete: " + String(filename) + ",size: " + String(index + len);
     // close the file handle as the upload is now done
     request->_tempFile.close();
-
     Serial.println(logmessage);
 
     flash(filename);
-    // request->redirect("/");
+    //request->redirect("/");
   }
 }
 
@@ -508,6 +516,9 @@ void setup()
       rebootESP("ERROR: Cannot mount SPIFFS, Rebooting");
     }
 
+    deleteFile("firmware.bin");
+    deleteFile("toupload.txt");
+
     Serial.print("SPIFFS Free: ");
     Serial.println(humanReadableSize((SPIFFS.totalBytes() - SPIFFS.usedBytes())));
     Serial.print("SPIFFS Used: ");
@@ -550,7 +561,7 @@ void loop()
     CircleColor(0, 0, 0);
   }
 
-  // Serial.println("Yo bitches");
+  Serial.println("Yo bitches");
   magnetResetConfig();
 
   // touchPadRoutine();

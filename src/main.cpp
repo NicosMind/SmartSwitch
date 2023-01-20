@@ -102,40 +102,86 @@ void flash(String filename)
 
   Serial.println("Reset in 4 seconds...");
 
-  
   delay(4000);
 
   rebootESP("Rebooting...");
 }
 
-void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
+{
   String logmessage = "Client:" + request->client()->remoteIP().toString() + " " + request->url();
   Serial.println(logmessage);
 
-  if (!index) {
-    logmessage = "Upload Start: " + String(filename);
-    // open the file on first call and store the file handle in the request object
-    request->_tempFile = SPIFFS.open("/" + filename, "w");
+  if (!index)
+  {
+    logmessage = "OTA Update Start: " + String(filename);
     Serial.println(logmessage);
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN))
+    { // start with max available size
+      Update.printError(Serial);
+    }
   }
 
-  if (len) {
-    // stream the incoming chunk to the opened file
-    request->_tempFile.write(data, len);
+  if (len)
+  {
+    // flashing firmware to ESP
+    if (Update.write(data, len) != len)
+    {
+      Update.printError(Serial);
+    }
     logmessage = "Writing file: " + String(filename) + " index=" + String(index) + " len=" + String(len);
     Serial.println(logmessage);
   }
 
-  if (final) {
-    logmessage = "Upload Complete: " + String(filename) + ",size: " + String(index + len);
-    // close the file handle as the upload is now done
-    request->_tempFile.close();
-    Serial.println(logmessage);
-
-    flash(filename);
-    //request->redirect("/");
+  if (final)
+  {
+    if (Update.end(true))
+    { // true to set the size to the current progress
+      logmessage = "OTA Complete: " + String(filename) + ",size: " + String(index + len);
+      Serial.println(logmessage);
+    }
+    else
+    {
+      Update.printError(Serial);
+    }
+    request->redirect("/");
+    ESP.restart();
   }
 }
+
+String server_ui_size(const size_t bytes) {
+  if (bytes < 1024) return String(bytes) + " B";
+  else if (bytes < (1024 * 1024)) return String(bytes / 1024.0) + " KB";
+  else if (bytes < (1024 * 1024 * 1024)) return String(bytes / 1024.0 / 1024.0) + " MB";
+  else return String(bytes / 1024.0 / 1024.0 / 1024.0) + " GB";
+  }
+
+String server_directory(bool ishtml) {
+  String returnText = "";
+  Serial.println("Listing files stored on SPIFFS");
+  File root = SPIFFS.open("/");
+  File foundfile = root.openNextFile();
+  if (ishtml) {
+    returnText += "<table align='center'><tr><th align='left'>Name</th><th align='left'>Size</th><th></th><th></th></tr>";
+  }
+  while (foundfile) {
+    if (ishtml) {
+      returnText += "<tr align='left'><td>" + String(foundfile.name()) + "</td><td>" + server_ui_size(foundfile.size()) + "</td>";
+      returnText += "<td><button class='directory_buttons' onclick=\"directory_button_handler(\'" + String(foundfile.name()) + "\', \'download\')\">Download</button>";
+      returnText += "<td><button class='directory_buttons' onclick=\"directory_button_handler(\'" + String(foundfile.name()) + "\', \'delete\')\">Delete</button></tr>";
+    } else {
+      returnText += "File: " + String(foundfile.name()) + " Size: " + server_ui_size(foundfile.size()) + "\n";
+    }
+    foundfile = root.openNextFile();
+  }
+  if (ishtml) {
+    returnText += "</table>";
+  }
+  root.close();
+  foundfile.close();
+  return returnText;
+}
+
 
 // Make size of files human readable
 // source: https://github.com/CelliesProjects/minimalUploadAuthESP32
@@ -381,9 +427,6 @@ void initWebServerConfig()
   server.on("/img.png", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(SPIFFS, "/img.png", "image/png"); });
 
-  server.on("/hello", HTTP_GET, [](AsyncWebServerRequest *request)
-            { request->send(200, "text/plain", "Hello World"); });
-
   server.on("/Setup", HTTP_POST, [](AsyncWebServerRequest *request)
             {
               String ssidValue;
@@ -534,6 +577,7 @@ void setup()
     Serial.print(WiFi.getHostname());
     initSpiffs();
     initWebServer();
+    Serial.println(server_directory(false));
   }
   else
   {
@@ -561,7 +605,7 @@ void loop()
     CircleColor(0, 0, 0);
   }
 
-  Serial.println("Yo bitches");
+  Serial.println("OTA4");
   magnetResetConfig();
 
   // touchPadRoutine();

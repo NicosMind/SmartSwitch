@@ -7,6 +7,7 @@
 #include <SPIFFS.h>
 #include "Update.h"
 #include "driver/adc.h"
+#include <PubSubClient.h>
 
 #define LED_PIN 32
 #define NUM_LEDS 8
@@ -27,6 +28,13 @@ const String PASSWORD_PARAM = "password";
 const String NAME_PARAM = "name";
 const String LOCATION_PARAM = "location";
 const String DEFAULT_NAME = "NicosMind Switch";
+
+const char *mqtt_server = "10.0.0.74";
+WiFiClient espClient;
+PubSubClient client(espClient);
+long lastMsg = 0;
+char msg[50];
+int value = 0;
 
 String listFiles(bool ishtml = false);
 
@@ -149,39 +157,50 @@ void handleUpload(AsyncWebServerRequest *request, String filename, size_t index,
   }
 }
 
-String server_ui_size(const size_t bytes) {
-  if (bytes < 1024) return String(bytes) + " B";
-  else if (bytes < (1024 * 1024)) return String(bytes / 1024.0) + " KB";
-  else if (bytes < (1024 * 1024 * 1024)) return String(bytes / 1024.0 / 1024.0) + " MB";
-  else return String(bytes / 1024.0 / 1024.0 / 1024.0) + " GB";
-  }
+String server_ui_size(const size_t bytes)
+{
+  if (bytes < 1024)
+    return String(bytes) + " B";
+  else if (bytes < (1024 * 1024))
+    return String(bytes / 1024.0) + " KB";
+  else if (bytes < (1024 * 1024 * 1024))
+    return String(bytes / 1024.0 / 1024.0) + " MB";
+  else
+    return String(bytes / 1024.0 / 1024.0 / 1024.0) + " GB";
+}
 
-String server_directory(bool ishtml) {
+String server_directory(bool ishtml)
+{
   String returnText = "";
   Serial.println("Listing files stored on SPIFFS");
   File root = SPIFFS.open("/");
   File foundfile = root.openNextFile();
-  if (ishtml) {
+  if (ishtml)
+  {
     returnText += "<table align='center'><tr><th align='left'>Name</th><th align='left'>Size</th><th></th><th></th></tr>";
   }
-  while (foundfile) {
-    if (ishtml) {
+  while (foundfile)
+  {
+    if (ishtml)
+    {
       returnText += "<tr align='left'><td>" + String(foundfile.name()) + "</td><td>" + server_ui_size(foundfile.size()) + "</td>";
       returnText += "<td><button class='directory_buttons' onclick=\"directory_button_handler(\'" + String(foundfile.name()) + "\', \'download\')\">Download</button>";
       returnText += "<td><button class='directory_buttons' onclick=\"directory_button_handler(\'" + String(foundfile.name()) + "\', \'delete\')\">Delete</button></tr>";
-    } else {
+    }
+    else
+    {
       returnText += "File: " + String(foundfile.name()) + " Size: " + server_ui_size(foundfile.size()) + "\n";
     }
     foundfile = root.openNextFile();
   }
-  if (ishtml) {
+  if (ishtml)
+  {
     returnText += "</table>";
   }
   root.close();
   foundfile.close();
   return returnText;
 }
-
 
 // Make size of files human readable
 // source: https://github.com/CelliesProjects/minimalUploadAuthESP32
@@ -391,30 +410,6 @@ String listFiles(bool ishtml)
   return returnText;
 }
 
-// String processor(const String &var)
-// {
-//   if (var == "FILELIST")
-//   {
-//     return listFiles(true);
-//   }
-//   if (var == "FREESPIFFS")
-//   {
-//     return humanReadableSize((SPIFFS.totalBytes() - SPIFFS.usedBytes()));
-//   }
-
-//   if (var == "USEDSPIFFS")
-//   {
-//     return humanReadableSize(SPIFFS.usedBytes());
-//   }
-
-//   if (var == "TOTALSPIFFS")
-//   {
-//     return humanReadableSize(SPIFFS.totalBytes());
-//   }
-
-//   return String();
-// }
-
 /// config webserver bootstrap
 void initWebServerConfig()
 {
@@ -535,6 +530,37 @@ void initInterrupts()
   attachInterrupt(27, setLeft, RISING);
 }
 
+void mqttCallback(char *topic, byte *message, unsigned int length)
+{
+  Serial.print("Message arrived on topic: ");
+  Serial.print(topic);
+  Serial.print(". Message: ");
+  String messageTemp;
+
+  for (int i = 0; i < length; i++)
+  {
+    Serial.print((char)message[i]);
+    messageTemp += (char)message[i];
+  }
+  Serial.println();
+
+  // Feel free to add more if statements to control more GPIOs with MQTT
+
+  // If a message is received on the topic esp32/output, you check if the message is either "on" or "off".
+  // Changes the output state according to the message
+  // if (String(topic) == "esp32/output") {
+  //   Serial.print("Changing output to ");
+  //   if(messageTemp == "on"){
+  //     Serial.println("on");
+  //     digitalWrite(ledPin, HIGH);
+  //   }
+  //   else if(messageTemp == "off"){
+  //     Serial.println("off");
+  //     digitalWrite(ledPin, LOW);
+  //   }
+  // }
+}
+
 void setup()
 {
   Serial.begin(115200);
@@ -578,6 +604,9 @@ void setup()
     initSpiffs();
     initWebServer();
     Serial.println(server_directory(false));
+
+    client.setServer(mqtt_server, 1883);
+    client.setCallback(mqttCallback);
   }
   else
   {
@@ -590,14 +619,46 @@ void setup()
   }
 }
 
+void reconnect()
+{
+  // Loop until we're reconnected
+  while (!client.connected())
+  {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect
+    // TODO change the name below and add to memory
+    if (client.connect("SmartSwicthNameMustBeUnique"))
+    {
+      Serial.println("connected");
+      // Subscribe
+      client.subscribe("tanuki");
+      client.setCallback(mqttCallback);
+    }
+    else
+    {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+
 void loop()
 {
+  if (!client.connected())
+  {
+    reconnect();
+  }
+  client.loop();
 
   if (a == 1)
   {
+    client.publish("topic", "salut");
     for (int i = 0; i <= 1; i++)
     {
-      CircleColor(255, 0, 0);
+      CircleColor(125, 0, 0);
     }
   }
   else
@@ -605,7 +666,6 @@ void loop()
     CircleColor(0, 0, 0);
   }
 
-  Serial.println("OTA4");
   magnetResetConfig();
 
   // touchPadRoutine();
